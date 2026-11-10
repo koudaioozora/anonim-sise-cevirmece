@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#090b16">
+  <meta name="description" content="2-6 kişilik anonim, cinsiyetsiz, sesli ve yazılı Doğruluk mu Cesaret mi (Şişe Çevirmece) parti oyunu.">
+  <title>Anonim Şişe Çevirmece • Doğruluk mu Cesaret mi</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <!-- LOBİ / GİRİŞ EKRANI -->
+  <div id="lobbyView" class="app-shell">
+    <header class="top-header">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">🍾</div>
+        <div>
+          <h1>Anonim Şişe Çevirmece</h1>
+          <p class="subtitle">Doğruluk mu Cesaret mi • Tamamen Anonim • Cinsiyetsiz • 2–6 Kişi</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="installAppBtn" class="btn btn-ghost hidden" type="button">📲 Uygulamayı Yükle</button>
+        <span id="connBadge" class="status-pill connecting">● Bağlanıyor...</span>
+      </div>
+    </header>
+
+    <main class="lobby-grid">
+      <!-- SOL KOLON: ANONİM KİMLİK & KODLA KATIL -->
+      <section class="lobby-col">
+        <div class="card glass">
+          <div class="card-head">
+            <h2>🎭 Anonim Kimliğin</h2>
+            <span class="badge badge-privacy">Cinsiyet Yok</span>
+          </div>
+          <p class="muted small-note">Oyuna girerken cinsiyet, ad veya kişisel bilgi istenmez. Sadece anonim bir rumuz ve maskot seç.</p>
+
+          <div class="profile-preview" id="profilePreview">
+            <div class="preview-avatar" id="previewAvatar">🦊</div>
+            <div class="preview-meta">
+              <strong id="previewNick">Gizli Tilki</strong>
+              <span>Anonim Oyuncu</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="nicknameInput">Anonim Rumuzun</label>
+            <div class="input-with-btn">
+              <input id="nicknameInput" type="text" maxlength="22" placeholder="Örn: Gece Yolcusu" autocomplete="off">
+              <button id="shuffleNickBtn" type="button" class="btn btn-secondary" title="Rastgele Rumuz Üret">🎲 Rastgele</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Anonim Avatar Seç</label>
+            <div id="avatarGrid" class="avatar-grid" role="radiogroup" aria-label="Anonim Avatarlar"></div>
+          </div>
+
+          <div class="form-group">
+            <label>Masa Rengi</label>
+            <div id="colorGrid" class="color-grid" role="radiogroup" aria-label="Neon Renkler"></div>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <div class="card-head">
+            <h2>🔑 Kod ile Masaya Katıl</h2>
+          </div>
+          <div class="input-with-btn">
+            <input id="joinCodeInput" type="text" maxlength="8" placeholder="Oda Kodu (Örn: K7M9X2)" autocomplete="off" style="text-transform: uppercase;">
+            <button id="joinByCodeBtn" type="button" class="btn btn-primary">Katıl</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SAĞ KOLON: ODA OLUŞTUR & AÇIK ODALAR -->
+      <section class="lobby-col">
+        <div class="card glass">
+          <div class="card-head">
+            <h2>✨ Yeni Anonim Oda Kur</h2>
+            <span class="badge">Min 2 • Max 6</span>
+          </div>
+
+          <form id="createRoomForm" class="stack-form">
+            <div class="form-group">
+              <label for="roomNameInput">Oda Adı (İsteğe bağlı)</label>
+              <input id="roomNameInput" type="text" maxlength="32" placeholder="Örn: Gece Masası" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+              <label>Kişi Limiti (En az 2 kişiyle başlar)</label>
+              <div id="maxPlayersGroup" class="segmented-pills">
+                <button type="button" class="pill-btn" data-val="2">2 Kişi</button>
+                <button type="button" class="pill-btn" data-val="3">3 Kişi</button>
+                <button type="button" class="pill-btn" data-val="4">4 Kişi</button>
+                <button type="button" class="pill-btn" data-val="5">5 Kişi</button>
+                <button type="button" class="pill-btn active" data-val="6">6 Kişi</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Sohbet Seçeneği</label>
+              <div id="chatModeGroup" class="mode-cards">
+                <button type="button" class="mode-option active" data-val="both">
+                  <span class="mode-icon">🎙️ + 💬</span>
+                  <strong>Sesli & Yazılı</strong>
+                  <small>İkisi de açık</small>
+                </button>
+                <button type="button" class="mode-option" data-val="text">
+                  <span class="mode-icon">💬</span>
+                  <strong>Sadece Yazılı</strong>
+                  <small>Sessiz & yazılı</small>
+                </button>
+                <button type="button" class="mode-option" data-val="voice">
+                  <span class="mode-icon">🎙️</span>
+                  <strong>Sadece Sesli</strong>
+                  <small>Canlı mikrofon</small>
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Oda Görünürlüğü</label>
+              <div id="visibilityGroup" class="segmented-pills two-col">
+                <button type="button" class="pill-btn active" data-val="public">🌐 Herkese Açık (Lobide Görünür)</button>
+                <button type="button" class="pill-btn" data-val="private">🔒 Özel (Sadece Kod / Link)</button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-cta btn-lg">🍾 Anonim Masayı Kur</button>
+          </form>
+        </div>
+
+        <div class="card glass">
+          <div class="card-head">
+            <h2>🌐 Herkese Açık Odalar</h2>
+            <button id="refreshRoomsBtn" type="button" class="btn btn-ghost btn-sm">↻ Yenile</button>
+          </div>
+          <div id="publicRoomsList" class="rooms-list">
+            <div class="empty-state">Şu anda açık oda yok. İlk anonim masayı sen kurabilirsin!</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- OYUN MASASI EKRANI -->
+  <div id="roomView" class="room-shell hidden">
+    <header class="room-topbar glass">
+      <div class="room-meta">
+        <div class="room-title-row">
+          <h2 id="roomTitle">Anonim Masa</h2>
+          <span id="roomCountBadge" class="badge">1/6</span>
+          <span id="roomChatModeBadge" class="badge badge-accent">🎙️ + 💬 Sesli & Yazılı</span>
+        </div>
+        <div class="room-code-row">
+          <span>Kod: <strong id="roomCodeText">------</strong></span>
+          <button id="copyCodeBtn" type="button" class="mini-btn">📋 Kopyala</button>
+          <button id="copyLinkBtn" type="button" class="mini-btn">🔗 Davet Linki</button>
+          <select id="hostChatModeSelect" class="mini-select hidden" title="Sohbet modunu değiştir">
+            <option value="both">🎙️ + 💬 Sesli & Yazılı</option>
+            <option value="text">💬 Sadece Yazılı</option>
+            <option value="voice">🎙️ Sadece Sesli</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="room-controls">
+        <div id="voiceControls" class="voice-controls">
+          <button id="toggleMicBtn" type="button" class="btn btn-voice">🎙️ Mikrofonu Aç</button>
+          <button id="toggleDeafenBtn" type="button" class="btn btn-ghost btn-icon" title="Gelen sesleri sustur/aç">🔊</button>
+          <button id="togglePttBtn" type="button" class="btn btn-ghost btn-sm" title="Bas-Konuş (Space)">📻 Bas-Konuş</button>
+          <button id="pttHoldBtn" type="button" class="btn btn-ptt hidden">🎙️ Basılı Tut (Space)</button>
+        </div>
+        <button id="toggleSfxBtn" type="button" class="btn btn-ghost btn-icon" title="Oyun ses efektleri">🔔</button>
+        <button id="leaveRoomBtn" type="button" class="btn btn-danger-soft">🚪 Ayrıl</button>
+      </div>
+    </header>
+
+    <div id="voiceWarningBanner" class="banner-warn hidden"></div>
+
+    <div class="room-workspace">
+      <!-- SOL / ORTA: MASA & TUR AŞAMASI -->
+      <section class="table-section">
+        <div class="table-arena" id="tableArena">
+          <div class="table-surface">
+            <div class="table-ring outer"></div>
+            <div class="table-ring inner"></div>
+
+            <div class="bottle-legend">
+              <span class="legend-tip">▲ Uç: Cevaplayan</span>
+              <span class="legend-tail">▼ Arka: Soran</span>
+            </div>
+
+            <div id="bottleWrapper" class="bottle-wrapper">
+              <svg id="bottleSvg" class="bottle-svg" viewBox="0 0 120 260" aria-label="Şişe">
+                <defs>
+                  <linearGradient id="bottleGlass" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#00f5d4" stop-opacity="0.95"/>
+                    <stop offset="48%" stop-color="#38bdf8" stop-opacity="0.88"/>
+                    <stop offset="100%" stop-color="#ff4d8d" stop-opacity="0.95"/>
+                  </linearGradient>
+                  <linearGradient id="bottleNeck" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#ffffff"/>
+                    <stop offset="100%" stop-color="#00f5d4"/>
+                  </linearGradient>
+                </defs>
+                <!-- Tip Arrow Glow -->
+                <polygon points="60,4 49,24 71,24" fill="#00f5d4" opacity="0.95"/>
+                <!-- Cap & Neck -->
+                <rect x="49" y="28" width="22" height="14" rx="4" fill="url(#bottleNeck)"/>
+                <path d="M51 42 L69 42 L69 78 C69 96 89 108 89 136 L89 216 C89 232 76 242 60 242 C44 242 31 232 31 216 L31 136 C31 108 51 96 51 78 Z"
+                      fill="url(#bottleGlass)" stroke="rgba(255,255,255,0.65)" stroke-width="2.5"/>
+                <!-- Glass Highlight -->
+                <path d="M43 138 L43 210" stroke="rgba(255,255,255,0.45)" stroke-width="4" stroke-linecap="round"/>
+                <!-- Center Emblem -->
+                <circle cx="60" cy="166" r="18" fill="#090b16" fill-opacity="0.55" stroke="rgba(255,255,255,0.35)" stroke-width="1.5"/>
+                <text x="60" y="172" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="700" font-family="Outfit, sans-serif">?</text>
+                <!-- Tail Pointer -->
+                <polygon points="60,256 51,244 69,244" fill="#ff4d8d" opacity="0.95"/>
+              </svg>
+            </div>
+          </div>
+
+          <div id="seatsLayer" class="seats-layer"></div>
+          <div id="reactionsLayer" class="reactions-layer" aria-hidden="true"></div>
+        </div>
+
+        <!-- TUR KONTROL & SORU KARTI -->
+        <div id="turnStage" class="turn-stage glass">
+          <!-- Dinamik olarak app.js tarafından doldurulur -->
+        </div>
+
+        <div id="reactionBar" class="reaction-bar glass" aria-label="Hızlı Tepkiler">
+          <span>Tepki gönder:</span>
+          <button type="button" class="react-btn" data-emoji="👏">👏</button>
+          <button type="button" class="react-btn" data-emoji="😂">😂</button>
+          <button type="button" class="react-btn" data-emoji="🔥">🔥</button>
+          <button type="button" class="react-btn" data-emoji="😱">😱</button>
+          <button type="button" class="react-btn" data-emoji="🤫">🤫</button>
+          <button type="button" class="react-btn" data-emoji="👀">👀</button>
+          <button type="button" class="react-btn" data-emoji="💜">💜</button>
+        </div>
+      </section>
+
+      <!-- SAĞ PANEL: SOHBET & TUR GEÇMİŞİ -->
+      <aside class="side-panel glass">
+        <div class="side-tabs">
+          <button id="tabChatBtn" type="button" class="side-tab active">💬 Sohbet</button>
+          <button id="tabHistoryBtn" type="button" class="side-tab">📜 Geçmiş (<span id="historyCount">0</span>)</button>
+        </div>
+
+        <div id="chatTabPane" class="side-pane active">
+          <div id="chatModeInfo" class="chat-mode-info hidden"></div>
+          <div id="chatMessages" class="chat-messages"></div>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" type="text" maxlength="400" placeholder="Anonim mesaj yaz..." autocomplete="off">
+            <button id="chatSendBtn" type="submit" class="btn btn-primary btn-sm">Gönder</button>
+          </form>
+        </div>
+
+        <div id="historyTabPane" class="side-pane hidden">
+          <div id="historyList" class="history-list">
+            <div class="empty-state">Henüz tamamlanan bir tur yok.</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="remoteAudioContainer" class="hidden" aria-hidden="true"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

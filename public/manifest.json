@@ -1,0 +1,19 @@
+{
+  "name": "Anonim Şişe Çevirmece • Doğruluk mu Cesaret mi",
+  "short_name": "Anonim Şişe",
+  "description": "2-6 kişilik anonim, cinsiyetsiz, sesli ve yazılı Doğruluk mu Cesaret mi parti oyunu.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#090b16",
+  "theme_color": "#090b16",
+  "lang": "tr",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

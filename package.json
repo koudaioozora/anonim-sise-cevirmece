@@ -1,0 +1,22 @@
+{
+  "name": "anonim-sise-cevirmece",
+  "version": "1.0.0",
+  "description": "Anonim Doğruluk mu Cesaret mi (Şişe Çevirmece) - 2-6 kişilik gerçek zamanlı sesli ve yazılı parti oyunu",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "truth-or-dare",
+    "dogruluk-mu-cesaret-mi",
+    "webrtc",
+    "websocket",
+    "anonymous",
+    "pwa"
+  ],
+  "license": "MIT"
+}
