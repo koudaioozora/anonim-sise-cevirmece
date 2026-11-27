@@ -14,7 +14,7 @@ if errorlevel 1 (
   )
 )
 
-echo Anonim Sise Cevirmece baslatiliyor...
+echo Lokal — Anonim Sosyal Masa baslatiliyor...
 echo Tarayicida acilacak adres: http://localhost:3000
 start "" http://localhost:3000
 "%NODE_EXE%" server.js

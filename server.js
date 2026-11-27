@@ -7,9 +7,15 @@ const crypto = require('crypto');
 
 const { SimpleWebSocketServer } = require('./src/ws');
 const { GameManager, MIN_PLAYERS, MAX_PLAYERS } = require('./src/gameEngine');
-const { ANONYMOUS_AVATARS, ANONYMOUS_COLORS } = require('./src/questions');
+const { ANONYMOUS_AVATARS, getDeckList } = require('./src/questions');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type'
+};
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -25,6 +31,7 @@ const MIME_TYPES = {
 function sendJson(res, statusCode, data) {
   const body = JSON.stringify(data);
   res.writeHead(statusCode, {
+    ...CORS_HEADERS,
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff'
@@ -52,13 +59,10 @@ function serveStatic(req, res) {
 
   fs.stat(resolved, (err, stat) => {
     if (err || !stat.isFile()) {
-      const indexFallback = path.join(PUBLIC_DIR, 'index.html');
-      if (!urlPath.includes('.') && fs.existsSync(indexFallback)) {
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'X-Content-Type-Options': 'nosniff'
-        });
-        fs.createReadStream(indexFallback).pipe(res);
+      const fallback = path.join(PUBLIC_DIR, 'index.html');
+      if (!urlPath.includes('.') && fs.existsSync(fallback)) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
+        fs.createReadStream(fallback).pipe(res);
         return;
       }
       res.writeHead(404);
@@ -67,22 +71,32 @@ function serveStatic(req, res) {
     }
 
     const ext = path.extname(resolved).toLowerCase();
-    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     res.writeHead(200, {
-      'Content-Type': contentType,
+      'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
       'X-Content-Type-Options': 'nosniff',
-      'Cache-Control': ext === '.html' || resolved.endsWith('sw.js') ? 'no-cache' : 'public, max-age=3600'
+      'Cache-Control': 'no-store'
     });
     fs.createReadStream(resolved).pipe(res);
   });
 }
 
-function createAppServer({ spinDurationMs = 3600 } = {}) {
-  const game = new GameManager({ spinDurationMs });
+function createAppServer({
+  spinDurationMs = 4300,
+  answerTimeoutMs = 30000,
+  botDelayMs = 950,
+  seedRooms = true
+} = {}) {
+  const game = new GameManager({ spinDurationMs, answerTimeoutMs, botDelayMs, seedRooms });
   const connections = new Map(); // playerId -> wsClient
 
   const httpServer = http.createServer((req, res) => {
     const urlPath = (req.url || '/').split('?')[0];
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS);
+      res.end();
+      return;
+    }
 
     if (req.method === 'GET' && urlPath === '/api/health') {
       return sendJson(res, 200, {
@@ -97,14 +111,12 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
         minPlayers: MIN_PLAYERS,
         maxPlayers: MAX_PLAYERS,
         avatars: ANONYMOUS_AVATARS,
-        colors: ANONYMOUS_COLORS
+        decks: getDeckList()
       });
     }
 
     if (req.method === 'GET' && urlPath === '/api/rooms') {
-      return sendJson(res, 200, {
-        rooms: game.getPublicRooms()
-      });
+      return sendJson(res, 200, { rooms: game.getPublicRooms() });
     }
 
     if (req.method === 'GET' || req.method === 'HEAD') {
@@ -121,6 +133,7 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
     const room = game.rooms.get(roomCode);
     if (!room) return;
     for (const player of room.players) {
+      if (player.isBot) continue;
       if (excludePlayerId && player.id === excludePlayerId) continue;
       const client = connections.get(player.id);
       if (client) client.sendJson(payload);
@@ -136,7 +149,36 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
     }
   }
 
+  function sendAccountUpdate(playerId, extra = {}) {
+    const client = connections.get(playerId);
+    if (!client) return;
+    const acc = game.getAccountByPlayer(playerId);
+    client.sendJson({
+      type: 'account_update',
+      account: game.serializeAccount(acc),
+      ...extra
+    });
+  }
+
+  function makeRoomCallbacks() {
+    return {
+      onChange: (updatedRoom) => {
+        broadcastToRoom(updatedRoom.code, {
+          type: 'room_state',
+          room: game.serializeRoom(updatedRoom)
+        });
+      },
+      onExpire: (expiredRoom) => {
+        broadcastToRoom(expiredRoom.code, {
+          type: 'turn_expired',
+          room: game.serializeRoom(expiredRoom)
+        });
+      }
+    };
+  }
+
   wss.on('connection', (ws) => {
+    ws.on('error', () => {});
     const playerId = crypto.randomUUID();
     connections.set(playerId, ws);
 
@@ -146,7 +188,7 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
       minPlayers: MIN_PLAYERS,
       maxPlayers: MAX_PLAYERS,
       avatars: ANONYMOUS_AVATARS,
-      colors: ANONYMOUS_COLORS,
+      decks: getDeckList(),
       publicRooms: game.getPublicRooms()
     });
 
@@ -161,157 +203,306 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
       if (!msg || typeof msg.type !== 'string') return;
 
       switch (msg.type) {
+        case 'authenticate': {
+          const res = game.authenticate(playerId, msg.auth);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
+            return;
+          }
+          ws.sendJson({
+            type: 'auth_ok',
+            account: res.account,
+            restored: res.restored,
+            publicRooms: game.getPublicRooms()
+          });
+          break;
+        }
+
         case 'list_rooms': {
           ws.sendJson({ type: 'public_rooms', rooms: game.getPublicRooms() });
           break;
         }
 
         case 'create_room': {
-          const result = game.createRoom(playerId, msg.profile, msg.options);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.createRoom(playerId, msg.options);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          ws.sendJson({ type: 'room_joined', room: result.room });
+          ws.sendJson({ type: 'room_joined', room: res.room });
           broadcastPublicRooms();
           break;
         }
 
         case 'join_room': {
-          const result = game.joinRoom(playerId, msg.code, msg.profile);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.joinRoom(playerId, msg.code);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          ws.sendJson({ type: 'room_joined', room: result.room });
-          broadcastToRoom(result.room.code, {
-            type: 'room_state',
-            room: result.room
-          }, playerId);
-          broadcastToRoom(result.room.code, {
-            type: 'peer_joined',
-            peerId: playerId
-          }, playerId);
+          ws.sendJson({ type: 'room_joined', room: res.room });
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room }, playerId);
+          broadcastToRoom(res.room.code, { type: 'peer_joined', peerId: playerId }, playerId);
+          broadcastPublicRooms();
+          break;
+        }
+
+        case 'join_random': {
+          const res = game.joinRandomPublicRoom(playerId);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
+            return;
+          }
+          ws.sendJson({ type: 'room_joined', room: res.room });
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room }, playerId);
+          broadcastToRoom(res.room.code, { type: 'peer_joined', peerId: playerId }, playerId);
+          broadcastPublicRooms();
+          break;
+        }
+
+        case 'add_bot': {
+          const res = game.addBot(playerId);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
+            return;
+          }
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
           broadcastPublicRooms();
           break;
         }
 
         case 'leave_room': {
-          const result = game.leaveRoom(playerId);
+          const res = game.leaveRoom(playerId);
           ws.sendJson({ type: 'left_room', publicRooms: game.getPublicRooms() });
-          if (result.ok && !result.roomDeleted) {
-            broadcastToRoom(result.code, { type: 'room_state', room: result.room });
-            broadcastToRoom(result.code, { type: 'peer_left', peerId: playerId });
+          if (res.ok && !res.roomDeleted) {
+            broadcastToRoom(res.code, { type: 'room_state', room: res.room });
+            broadcastToRoom(res.code, { type: 'peer_left', peerId: playerId });
           }
           broadcastPublicRooms();
           break;
         }
 
         case 'update_room_settings': {
-          const result = game.updateRoomSettings(playerId, msg.settings);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.updateRoomSettings(playerId, msg.settings);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.room.code, { type: 'room_state', room: result.room });
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
           broadcastPublicRooms();
           break;
         }
 
         case 'spin_bottle': {
-          const result = game.spinBottle(playerId, (settledRoom) => {
-            broadcastToRoom(settledRoom.code, {
-              type: 'room_state',
-              room: game.serializeRoom(settledRoom)
-            });
-          });
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.spinBottle(playerId, makeRoomCallbacks());
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.room.code, {
+          broadcastToRoom(res.room.code, {
             type: 'bottle_spun',
-            room: result.room,
-            spin: result.spinResult
+            room: res.room,
+            spin: res.spinResult
           });
           break;
         }
 
         case 'choose_mode': {
-          const result = game.chooseMode(playerId, msg.mode);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.chooseMode(playerId, msg.mode, makeRoomCallbacks());
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.room.code, { type: 'room_state', room: result.room });
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
           break;
         }
 
         case 'draw_card': {
-          const result = game.drawDeckCard(playerId, msg.category);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.drawDeckCard(playerId, msg.category);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          ws.sendJson({ type: 'card_drawn', card: result.card });
+          ws.sendJson({ type: 'card_drawn', card: res.card });
           break;
         }
 
         case 'submit_question': {
-          const result = game.submitQuestion(playerId, msg.question);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.submitQuestion(playerId, msg.question, makeRoomCallbacks());
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.room.code, { type: 'room_state', room: result.room });
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
+          break;
+        }
+
+        case 'replace_question': {
+          const res = game.replaceCenterQuestion(playerId, msg.text, makeRoomCallbacks());
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
+            return;
+          }
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
           break;
         }
 
         case 'submit_answer': {
-          const result = game.submitWrittenAnswer(playerId, msg.text);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.submitWrittenAnswer(playerId, msg.text);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.room.code, { type: 'room_state', room: result.room });
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
           break;
         }
 
         case 'complete_turn': {
-          const result = game.completeTurn(playerId, msg.status);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.completeTurn(playerId, msg.success !== false);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.room.code, { type: 'room_state', room: result.room });
+          broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
+          for (const ev of res.rewardEvents || []) {
+            sendAccountUpdate(ev.playerId, { ticketsEarned: ev.ticketsEarned });
+          }
           break;
         }
 
         case 'chat_message': {
-          const result = game.sendChatMessage(playerId, msg.text);
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          const res = game.sendChatMessage(playerId, msg.text, msg.mentionedIds);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.roomCode, {
+          broadcastToRoom(res.roomCode, {
             type: 'chat_message',
-            message: result.message
+            message: res.message
+          });
+
+          // If a bot was mentioned, let the bot reply playfully after a short pause
+          const room = game.rooms.get(res.roomCode);
+          if (room && res.mentionedIds.length > 0) {
+            for (const mId of res.mentionedIds) {
+              const bot = room.players.find((p) => p.id === mId && p.isBot);
+              if (bot) {
+                const sender = room.players.find((p) => p.id === playerId);
+                const senderAlias = sender ? sender.alias : 'Dostum';
+                const replyTimer = setTimeout(() => {
+                  const rCheck = game.rooms.get(res.roomCode);
+                  if (!rCheck) return;
+                  const replies = [
+                    `Hop @${senderAlias} koltuğum sallandı, duydum seni! 😄`,
+                    `Beni mi dürttün @${senderAlias}? Sıra bana mı geliyor yoksa 👀`,
+                    `Mesajınla titredim, buradayım! ✨`
+                  ];
+                  const botMsg = {
+                    id: crypto.randomUUID(),
+                    type: 'user',
+                    playerId: bot.id,
+                    alias: bot.alias,
+                    emoji: bot.emoji,
+                    text: replies[Math.floor(Math.random() * replies.length)],
+                    mentionedIds: [],
+                    timestamp: Date.now()
+                  };
+                  rCheck.chat.push(botMsg);
+                  if (rCheck.chat.length > 80) rCheck.chat.shift();
+                  broadcastToRoom(res.roomCode, { type: 'chat_message', message: botMsg });
+                }, Math.min(900, Math.max(50, botDelayMs)));
+                if (replyTimer.unref) replyTimer.unref();
+              }
+            }
+          }
+          break;
+        }
+
+        case 'unlock_dm': {
+          const targetId = typeof msg.targetKey === 'string' ? msg.targetKey : '';
+          if (!targetId) return;
+          const res = game.unlockDmContact(playerId, targetId);
+          if (!res.ok) {
+            if (res.noTickets) {
+              ws.sendJson({ type: 'dm_no_tickets', error: res.error });
+            } else {
+              ws.sendJson({ type: 'error', error: res.error });
+            }
+            return;
+          }
+          ws.sendJson({
+            type: 'dm_unlocked',
+            targetKey: targetId,
+            alreadyUnlocked: res.alreadyUnlocked,
+            account: res.account
+          });
+          break;
+        }
+
+        case 'select_deck': {
+          const res = game.selectDeck(playerId, msg.deckId);
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
+            return;
+          }
+          ws.sendJson({
+            type: 'deck_selected',
+            deckId: res.deck.id,
+            deckName: res.deck.shortName,
+            account: res.account
+          });
+          if (res.room) {
+            broadcastToRoom(res.room.code, { type: 'room_state', room: res.room });
+            broadcastPublicRooms();
+          }
+          break;
+        }
+
+        case 'private_dm': {
+          const targetKey = typeof msg.targetKey === 'string' ? msg.targetKey : '';
+          const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 220) : '';
+          if (!targetKey || !text) return;
+
+          const senderAcc = game.getAccountByPlayer(playerId);
+          // Find live recipient connection matching accountKey or playerId
+          let delivered = false;
+          for (const [otherId, otherClient] of connections.entries()) {
+            if (otherId === playerId) continue;
+            const otherAccKey = game.playerAccounts.get(otherId);
+            if (otherId === targetKey || otherAccKey === targetKey) {
+              otherClient.sendJson({
+                type: 'private_dm_received',
+                fromAccountKey: senderAcc.accountKey,
+                fromAlias: senderAcc.alias,
+                fromEmoji: senderAcc.emoji,
+                text,
+                timestamp: Date.now()
+              });
+              delivered = true;
+            }
+          }
+          ws.sendJson({
+            type: 'private_dm_sent',
+            targetKey,
+            text,
+            delivered,
+            timestamp: Date.now()
           });
           break;
         }
 
         case 'voice_state': {
-          const result = game.setVoiceState(playerId, {
+          const res = game.setVoiceState(playerId, {
             micEnabled: msg.micEnabled,
             speaking: msg.speaking
           });
-          if (!result.ok) {
-            ws.sendJson({ type: 'error', error: result.error });
+          if (!res.ok) {
+            ws.sendJson({ type: 'error', error: res.error });
             return;
           }
-          broadcastToRoom(result.roomCode, {
+          broadcastToRoom(res.roomCode, {
             type: 'voice_state',
-            ...result.voiceUpdate
+            ...res.voiceUpdate
           });
           break;
         }
@@ -320,8 +511,8 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
           const room = game.getRoomByPlayer(playerId);
           if (!room || room.chatMode === 'text') return;
           if (typeof msg.targetId !== 'string' || !msg.signal) return;
-          const isSameRoom = room.players.some((p) => p.id === msg.targetId);
-          if (!isSameRoom) return;
+          const sameRoom = room.players.some((p) => p.id === msg.targetId && !p.isBot);
+          if (!sameRoom) return;
           const targetClient = connections.get(msg.targetId);
           if (targetClient) {
             targetClient.sendJson({
@@ -334,12 +525,9 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
         }
 
         case 'reaction': {
-          const result = game.sendReaction(playerId, msg.emoji);
-          if (!result.ok) return;
-          broadcastToRoom(result.roomCode, {
-            type: 'reaction',
-            reaction: result.reaction
-          });
+          const res = game.sendReaction(playerId, msg.emoji);
+          if (!res.ok) return;
+          broadcastToRoom(res.roomCode, { type: 'reaction', reaction: res.reaction });
           break;
         }
 
@@ -350,11 +538,11 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
 
     ws.on('close', () => {
       connections.delete(playerId);
-      const result = game.leaveRoom(playerId);
-      if (result.ok) {
-        if (!result.roomDeleted) {
-          broadcastToRoom(result.code, { type: 'room_state', room: result.room });
-          broadcastToRoom(result.code, { type: 'peer_left', peerId: playerId });
+      const res = game.leaveRoom(playerId);
+      if (res.ok) {
+        if (!res.roomDeleted) {
+          broadcastToRoom(res.code, { type: 'room_state', room: res.room });
+          broadcastToRoom(res.code, { type: 'peer_left', peerId: playerId });
         }
         broadcastPublicRooms();
       }
@@ -362,6 +550,9 @@ function createAppServer({ spinDurationMs = 3600 } = {}) {
   });
 
   function shutdown() {
+    for (const room of game.rooms.values()) {
+      game._clearRoomTimers(room);
+    }
     wss.close();
     httpServer.close();
   }
@@ -375,7 +566,7 @@ if (require.main === module) {
   const { httpServer } = createAppServer();
 
   httpServer.listen(PORT, HOST, () => {
-    console.log(`Anonim Şişe Çevirmece sunucusu çalışıyor: http://localhost:${PORT}`);
+    console.log(`Lokal — Anonim Sosyal Masa sunucusu çalışıyor: http://localhost:${PORT}`);
   });
 }
 
