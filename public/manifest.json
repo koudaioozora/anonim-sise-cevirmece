@@ -1,0 +1,19 @@
+{
+  "name": "Lokal — Anonim Sosyal Masa",
+  "short_name": "Lokal",
+  "description": "Pastel temalı, kayıtsız, cinsiyetsiz 2-6 kişilik sesli/yazılı şişe çevirmece ve kalıcı mektup kutusu oyunu.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F8F5F0",
+  "theme_color": "#F8F5F0",
+  "lang": "tr",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

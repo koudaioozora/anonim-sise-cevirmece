@@ -1,0 +1,13 @@
+{
+  "appId": "com.lokal.masa",
+  "appName": "Lokal",
+  "webDir": "public",
+  "backgroundColor": "#F8F5F0",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#F8F5F0"
+  }
+}
